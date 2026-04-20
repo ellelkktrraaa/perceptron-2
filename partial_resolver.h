@@ -1,18 +1,18 @@
-#ifndef PARTIAL_RESOLVER_H
-#define PARTIAL_RESOLVER_H
+#ifndef __PARTIAL_RESOLVER_H
+#define __PARTIAL_RESOLVER_H
 
 #include "ner_sys.h"
 
 // 全局变量，存储整个网络的nodes数组
-extern Node* nodes_array;
 
 // 使用Node结构体的梯度计算函数
 // node: 当前节点 (包含self_val, weights, b_par, w_par等)
 // downstream_partials: 下游节点传回来的梯度数组
-void partial_resolver(Node* node, float* downstream_partials){
+void partial_resolver(Node* node){
     // 从Node结构体中提取参数
     float self_val = node->self_val;
     float* weights = node->weights;
+    int* link_table = node->link_table;
     size_t weight_size = node->link_num;
 
     // 初始化存储（如果需要）
@@ -24,27 +24,21 @@ void partial_resolver(Node* node, float* downstream_partials){
     }
 
     //caculate the partials of weights
-    float* deltas = (float*)malloc(sizeof(float)*weight_size);
-    for(int i=0; i<weight_size; i++){
-        deltas[i] = downstream_partials[i]*LEARNING_RATE;
-    }
-
-    // 使用Node结构体的存储
     float* w_par = node->w_par;
     float* b_par = node->b_par;
     float self_partial = 0.0f;
 
     for(int i=0; i<weight_size; i++){
-        // 获取下游节点的bias：nodes_array[node->link_table[i]].self_bia
-        float downstream_bias = nodes_array[node->link_table[i]].self_bia;
+        // 获取下游节点的bias：nodes_array[node->link_table[i]]->self_bia
+        float downstream_bias = nodes_array[node->link_table[i]]->self_bia;
         float freshed_contribution_to_node = z_partial(self_val*weights[i] - downstream_bias);
-        w_par[i] = freshed_contribution_to_node*self_val*downstream_partials[i]*1.0f;
-        b_par[i] = freshed_contribution_to_node*downstream_partials[i]*(-1.0f);
-        self_partial += downstream_partials[i]*weights[i]*z_partial(self_val*weights[i] - downstream_bias);
+        w_par[i] = freshed_contribution_to_node*self_val*all_partials[link_table[i]]*1.0f;
+        b_par[i] = freshed_contribution_to_node*all_partials[link_table[i]]*(-1.0f);
+        self_partial += all_partials[link_table[i]]*weights[i]*z_partial(self_val*weights[i] - downstream_bias);
     }
 
     // 将结果存回Node结构体
-    node->self_partial = self_partial;
+    all_partials[node->index] = self_partial;
     /**
      * 所以我们要聚焦在最后两个部分呢喵, ian是这样想的:
      (∂downstream_node_i/∂net_input_i), 
@@ -70,7 +64,6 @@ void partial_resolver(Node* node, float* downstream_partials){
 **=================================================================================
 **then we can update the weights and the bias
 */
-    free(deltas);
 }
 
 #endif
