@@ -1,4 +1,4 @@
-# nerou
+# some useless things
 ### struct
 ner_sys
 
