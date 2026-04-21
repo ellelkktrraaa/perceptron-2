@@ -20,15 +20,6 @@ typedef struct Node {
 } Node;
 
 
-float z(float x);           
-float z_partial(float x);   
-
-#define sigmoid z
-#define sigmoid_derivative z_partial
-
-void init_node(Node* node, int index, int link_num);
-void free_node(Node* node);
-
 #define NODE_NUM 40
 extern Node* nodes_array[NODE_NUM];//id-->ptr
 extern float all_partials[NODE_NUM];//id-->par
@@ -38,5 +29,29 @@ extern float all_partials[NODE_NUM];//id-->par
 
 extern int layers[LAYER_NUM][MAX_LAYER_SIZE];
 extern int layer_size[LAYER_NUM];
+
+
+float z(float x);           
+float z_partial(float x);   
+
+#define sigmoid z
+#define sigmoid_derivative z_partial
+
+
+void init_layer(int layer_index, int size, int* nodes_index){
+    layer_size[layer_index] = size;
+    for(int i=0; i<size; i++)
+    layers[layer_index][i] = nodes_index[i];
+}
+
+void init_node(int index, int link_num, int* link_table, int bia, float* weights){
+    Node* node=nodes_array[index];
+    node->link_num = link_num;
+    node->link_table = link_table;
+    node->weights = weights;
+    node->self_bia = bia;
+    node->index = index;
+}
+
 
 #endif
