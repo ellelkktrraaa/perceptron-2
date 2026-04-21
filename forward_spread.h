@@ -36,7 +36,7 @@ float* get_final_nodes_val(char* mode){
     float* final_nodes_val;
     for(int i=0; i<layer_size[LAYER_NUM-1]; i++){
         float vali=nodes_array[layers[LAYER_NUM][i]]->self_val;
-        if(mode = "sigmoide")vali=z(vali);
+        if(mode == "sigmoide")vali=z(vali);
         final_nodes_val[i]=vali;
     }
     return final_nodes_val;
