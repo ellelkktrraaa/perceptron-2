@@ -23,7 +23,7 @@ void init_partials(float* results, float* targets){
         float* weights = node->weights;
         float self_val = node->self_val;
 
-        all_partials[node_index]=0;//初始化
+        all_partials[node_index]=0;
         
         for(int j=0; j<link_num; j++){
             float wi = weights[j];

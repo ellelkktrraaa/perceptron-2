@@ -3,19 +3,13 @@
 
 #include "ner_sys.h"
 
-// 全局变量，存储整个网络的nodes数组
 
-// 使用Node结构体的梯度计算函数
-// node: 当前节点 (包含self_val, weights, b_par, w_par等)
-// downstream_partials: 下游节点传回来的梯度数组
 void partial_resolver(Node* node){
-    // 从Node结构体中提取参数
     float self_val = node->self_val;
     float* weights = node->weights;
     int* link_table = node->link_table;
     size_t weight_size = node->link_num;
 
-    // 初始化存储（如果需要）
     if(node->w_par == NULL){
         node->w_par = (float*)malloc(weight_size * sizeof(float));
     }
@@ -23,13 +17,11 @@ void partial_resolver(Node* node){
         node->b_par = (float*)malloc(weight_size * sizeof(float));
     }
 
-    //caculate the partials of weights
     float* w_par = node->w_par;
     float* b_par = node->b_par;
     float self_partial = 0.0f;
 
     for(int i=0; i<weight_size; i++){
-        // 获取下游节点的bias：nodes_array[node->link_table[i]]->self_bia
         float downstream_bias = nodes_array[node->link_table[i]]->self_bia;
         float freshed_contribution_to_node = z_partial(self_val*weights[i] - downstream_bias);
         w_par[i] = freshed_contribution_to_node*self_val*all_partials[link_table[i]]*1.0f;
@@ -37,7 +29,6 @@ void partial_resolver(Node* node){
         self_partial += all_partials[link_table[i]]*weights[i]*z_partial(self_val*weights[i] - downstream_bias);
     }
 
-    // 将结果存回Node结构体
     all_partials[node->index] = self_partial;
     /**
      * 所以我们要聚焦在最后两个部分呢喵, ian是这样想的:
