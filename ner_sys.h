@@ -21,12 +21,13 @@ typedef struct Node {
 } Node;
 
 
-#define NODE_NUM 40
+#define NODE_NUM 670
 extern Node* nodes_array[NODE_NUM];//id-->ptr
 extern float all_partials[NODE_NUM];//id-->par
+extern float bia_partials[NODE_NUM];//id-->bia_par
 
 #define LAYER_NUM 4
-#define MAX_LAYER_SIZE 12
+#define MAX_LAYER_SIZE 400
 
 extern int layers[LAYER_NUM][MAX_LAYER_SIZE];
 extern int layer_size[LAYER_NUM];
@@ -82,10 +83,12 @@ void init_full_link_nodes_rand(int index, int layer_index_connect_to){
     Node* node=nodes_array[index];
     node->link_table = layers[layer_index_connect_to];
     node->link_num = layer_size[layer_index_connect_to];
-    node->self_bia = (float)rand()/RAND_MAX;
+    node->self_bia = (float)rand()/RAND_MAX-0.4;
     for(int i=0; i<node->link_num; i++){
         node->weights[i] = (float)rand()/RAND_MAX;
     }
 }
+
+void init_net_from_json(char* file_path);
 
 #endif

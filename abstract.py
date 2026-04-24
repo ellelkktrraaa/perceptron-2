@@ -1,18 +1,12 @@
 #!/usr/bin/env python
 import tensorflow as tf
-import ctypes
+import struct
 import random
 import os
+
 (train_x, train_y), (test_x, test_y) = tf.keras.datasets.mnist.load_data()
 train_x = train_x.reshape(-1, 784).astype("float32")/255
 test_x = test_x.reshape(-1, 784).astype("float32")/255
-
-#train_y[i]-->the lable of the input with the index i: [0, 9]
-#train_x[i]-->the data of the input with the index i: np
-
-#this is so big, can we shrik it by 线性插值？
-#maybe we will lose information, so we can let most nerous to process 线性插值 data,
-#and a little of norous to save the infomation from raw!
 
 class Pair:
     def __init__(self, begin, end):
@@ -28,31 +22,47 @@ def rand_arr(pair, times):
     return arr
 
 def save_mini_bench(f_name: str, index_range):
-    try:
-        f = open(f_name, 'wb')
-        f.close()
-    except Exception:    
-        dir = f_name.split("\\")
-        print(f"[INFO] mkdir: {f_name}")
-        os.system(f'mkdir {dir[1]}')
-        os.system(f'touch {f_name}')
+    # 确保目录存在
+    dir_name = os.path.dirname(f_name)
+    if dir_name and not os.path.exists(dir_name):
+        os.makedirs(dir_name)
+        print(f"[INFO] Created directory: {dir_name}")
+    
+    n = index_range.end - index_range.begin
     
     with open(f_name, 'wb') as f:
+        # 文件头: MNIB
         f.write(b"MNIB")
-        f.write((ctypes.c_int)(n := -index_range.begin+index_range.end))
-        f.write((ctypes.c_int)(1))
-        f.write((ctypes.c_int)(784))
-        for i in  rand_arr(index_range, int(n**0.5)):
-            f.write((ctypes.c_int)(train_y[i]))
-            f.write(bytes((ctypes.c_float * 784)(*train_x[i])))
+        
+        # 样本数量 (int32)
+        f.write(struct.pack('<i', n))
+        
+        # 版本号 (int32) - 用于未来扩展
+        f.write(struct.pack('<i', 1))
+        
+        # 每个样本的特征数量 (int32) - 784 = 28*28
+        f.write(struct.pack('<i', 784))
+        
+        # 打乱索引顺序
+        indices = rand_arr(index_range, int(n**0.5))
+        
+        # 写入每个样本
+        for idx in indices:
+            # 标签 (int32)
+            f.write(struct.pack('<i', int(train_y[idx])))
+            
+            # 图像数据 (784个float32)
+            # 使用struct.pack确保字节顺序和格式正确
+            pixel_data = train_x[idx].flatten()
+            f.write(struct.pack('<' + 'f'*784, *pixel_data))
+    
+    print(f"[INFO] Saved {n} samples to {f_name}")
 
-for i in range(0, 60000//1000 ):
-    mnidx = "tr_" + str(i)
-    save_mini_bench(f'.\\mn\\{mnidx}.mnib', Pair(i*1000, (i+1)*1000))
-
-
-
-
-
-
-
+# 生成所有MNIB文件
+if __name__ == "__main__":
+    num_files = 60000 // 1000
+    for i in range(num_files):
+        mnidx = f"tr_{i}"
+        save_mini_bench(f'.\\mn\\{mnidx}.mnib', Pair(i*1000, (i+1)*1000))
+    
+    print(f"[INFO] Generated {num_files} MNIB files")

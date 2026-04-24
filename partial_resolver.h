@@ -2,8 +2,9 @@
 #define __PARTIAL_RESOLVER_H
 
 #include "ner_sys.h"
-
-
+//国内提供的所有ai连梯度的正负都分不清喵
+//千万不要在核心算法上用ai喵
+//甚至认为要吧bias加上去, 气笑了喵
 void partial_resolver(Node* node){
     float self_val = node->self_val;
     float* weights = node->weights;
@@ -12,24 +13,32 @@ void partial_resolver(Node* node){
 
     if(node->w_par == NULL){
         node->w_par = (float*)malloc(weight_size * sizeof(float));
+        for(int i=weight_size; i>=0; i--){
+            node->w_par[i] = 0;
+        }
     }
     if(node->b_par == NULL){
         node->b_par = (float*)malloc(weight_size * sizeof(float));
+        for(int i=weight_size; i>=0; i--){
+            node->b_par[i] = 0;
+        }
     }
-
+//是否zerofy w_par, b_par: 不需要, 全是赋值操作
     float* w_par = node->w_par;
     float* b_par = node->b_par;
     float self_partial = 0.0f;
 
     for(int i=0; i<weight_size; i++){
+        //结果:正partial
         float downstream_bias = nodes_array[node->link_table[i]]->self_bia;
         float freshed_contribution_to_node = z_partial(self_val*weights[i] - downstream_bias);
-        w_par[i] = freshed_contribution_to_node*self_val*all_partials[link_table[i]]*1.0f;
-        b_par[i] = freshed_contribution_to_node*all_partials[link_table[i]]*(-1.0f);
+        w_par[i] = w_par[i]*0.8+0.2*freshed_contribution_to_node*self_val*all_partials[link_table[i]]*1.0f;
+        b_par[i] = b_par[i]*0.8+0.2*freshed_contribution_to_node*all_partials[link_table[i]]*(-1.0f);
+        bia_partials[node->link_table[i]] += b_par[i];
         self_partial += all_partials[link_table[i]]*weights[i]*z_partial(self_val*weights[i] - downstream_bias);
     }
 
-    all_partials[node->index] = self_partial;
+    all_partials[node->index] = (0.2*self_partial + 0.8*all_partials[node->index])*1.2;
     /**
      * 所以我们要聚焦在最后两个部分呢喵, ian是这样想的:
      (∂downstream_node_i/∂net_input_i), 
