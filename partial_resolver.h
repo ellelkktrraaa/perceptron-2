@@ -5,7 +5,8 @@
 //国内提供的所有ai连梯度的正负都分不清喵
 //千万不要在核心算法上用ai喵
 //甚至认为要吧bias加上去, 气笑了喵
-void partial_resolver(Node* node){
+void partial_resolver(Node* node, float simu(float),  float simup(float)){
+
     float self_val = node->self_val;
     float* weights = node->weights;
     int* link_table = node->link_table;
@@ -13,13 +14,13 @@ void partial_resolver(Node* node){
 
     if(node->w_par == NULL){
         node->w_par = (float*)malloc(weight_size * sizeof(float));
-        for(int i=weight_size; i>=0; i--){
+        for(int i=0; i<weight_size; i++){
             node->w_par[i] = 0;
         }
     }
     if(node->b_par == NULL){
         node->b_par = (float*)malloc(weight_size * sizeof(float));
-        for(int i=weight_size; i>=0; i--){
+        for(int i=0; i<weight_size; i++){
             node->b_par[i] = 0;
         }
     }
@@ -31,19 +32,47 @@ void partial_resolver(Node* node){
     for(int i=0; i<weight_size; i++){
         //结果:正partial
         float downstream_bias = nodes_array[node->link_table[i]]->self_bia;
-        float freshed_contribution_to_node = z_partial(self_val*weights[i] - downstream_bias);
-        w_par[i] = w_par[i]*0.8+0.2*freshed_contribution_to_node*self_val*all_partials[link_table[i]]*1.0f;
-        b_par[i] = b_par[i]*0.8+0.2*freshed_contribution_to_node*all_partials[link_table[i]]*(-1.0f);
+        float freshed_contribution_to_node = z_partial(nodes_array[link_table[i]]->self_val);
+        float w_grad = freshed_contribution_to_node*self_val*all_partials[link_table[i]]*1.0f;
+        float b_grad = freshed_contribution_to_node*all_partials[link_table[i]]*(-1.0f);
+        
+        // 裁剪梯度，放宽限制
+        if(w_grad > 10.0f) w_grad = 10.0f;
+        if(w_grad < -10.0f) w_grad = -10.0f;
+        if(b_grad > 10.0f) b_grad = 10.0f;
+        if(b_grad < -10.0f) b_grad = -10.0f;
+        
+        w_par[i] = w_par[i]*0.8+0.2*w_grad;
+        b_par[i] = b_par[i]*0.8+0.2*b_grad;
+        
+        // 裁剪 w_par 和 b_par，放宽限制
+        if(w_par[i] > 10.0f) w_par[i] = 10.0f;
+        if(w_par[i] < -10.0f) w_par[i] = -10.0f;
+        if(b_par[i] > 10.0f) b_par[i] = 10.0f;
+        if(b_par[i] < -10.0f) b_par[i] = -10.0f;
+        
         bia_partials[node->link_table[i]] += b_par[i];
-        self_partial += all_partials[link_table[i]]*weights[i]*z_partial(self_val*weights[i] - downstream_bias);
+        float grad_contrib = all_partials[link_table[i]]*weights[i]*z_partial(self_val*weights[i] - downstream_bias);
+        // 裁剪梯度贡献，放宽限制
+        if(grad_contrib > 10.0f) grad_contrib = 10.0f;
+        if(grad_contrib < -10.0f) grad_contrib = -10.0f;
+        self_partial += grad_contrib;
     }
 
-    all_partials[node->index] = (0.2*self_partial + 0.8*all_partials[node->index])*1.2;
+    // 裁剪 self_partial，放宽限制
+    if(self_partial > 10.0f) self_partial = 10.0f;
+    if(self_partial < -10.0f) self_partial = -10.0f;
+
+    all_partials[node->index] = 0.2*self_partial + 0.8*all_partials[node->index];
+    
+    // 裁剪最终梯度，放宽限制
+    if(all_partials[node->index] > 10.0f) all_partials[node->index] = 10.0f;
+    if(all_partials[node->index] < -10.0f) all_partials[node->index] = -10.0f;
     /**
      * 所以我们要聚焦在最后两个部分呢喵, ian是这样想的:
      (∂downstream_node_i/∂net_input_i), 
      也就是(p(node_i)/p(new_node)), 应该是前一个点的输出值对后一个点的值的影响呢, 
-     也就是 输出值:self_val*weight, 对下一个点的值的贡献: z(self_val*weight_i-bia_i)的影响呢, 
+     也就是 输出值:self_val*weight, 对下一个点的值的贡献: z(sigma(self_val*weight_i)-bia_i)的影响呢, 
      所以是z'(x-bia)|x=z_partial(x-bia)*1. 
      最后是(∂net_input_i/∂weights[i]),
      也就是 (new_node/p(w_i)) , w_i对输出值的影响呢, (wi*self_val)'=self_val, 是这样喵!

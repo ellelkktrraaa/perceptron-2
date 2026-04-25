@@ -15,7 +15,10 @@ float bia_partials[NODE_NUM];//id-->bia_par
 #define LAYER0_SIZE 400
 #define LAYER1_SIZE 200
 #define LAYER2_SIZE 60
-#define LAYER3_SIZE 10
+#define LAYER3_SIZE 100
+#define LAYER4_SIZE 10
+
+#define __FILE "network-2.json"
 
 #define RUNS 300
 
@@ -55,51 +58,69 @@ void init_network(){
     for(int i=0; i<LAYER3_SIZE; i++) layer3_nodes[i] = LAYER0_SIZE + LAYER1_SIZE + LAYER2_SIZE + i;
     init_layer(3, LAYER3_SIZE, layer3_nodes);
     
-    // 初始化第0层到第1层的连接（需要预先分配weights内存）
+
+    int layer4_nodes[LAYER4_SIZE];
+    for(int i=0; i<LAYER3_SIZE; i++) layer4_nodes[i] = LAYER0_SIZE + LAYER1_SIZE + LAYER2_SIZE + LAYER3_SIZE + i;
+    init_layer(4, LAYER4_SIZE, layer4_nodes);
+
+    // 使用 Xavier 初始化权重
+    float limit1 = sqrt(6.0f / (LAYER0_SIZE + LAYER1_SIZE));
     for(int i=0; i<LAYER0_SIZE; i++){
         nodes_array[i]->link_num = LAYER1_SIZE;
         nodes_array[i]->link_table = layers[1];
         nodes_array[i]->weights = (float*)malloc(LAYER1_SIZE * sizeof(float));
-        nodes_array[i]->self_bia = (float)rand()/RAND_MAX;
+        nodes_array[i]->self_bia = 0.0f;  // 初始偏置为0
         for(int j=0; j<LAYER1_SIZE; j++){
-            nodes_array[i]->weights[j] = (float)rand()/RAND_MAX;
+            nodes_array[i]->weights[j] = ((float)rand()/RAND_MAX)*2.0f*limit1 - limit1;
         }
     }
     
-    // 初始化第1层到第2层的连接
+    float limit2 = sqrt(6.0f / (LAYER1_SIZE + LAYER2_SIZE));
     for(int i=0; i<LAYER1_SIZE; i++){
         int idx = LAYER0_SIZE + i;
         nodes_array[idx]->link_num = LAYER2_SIZE;
         nodes_array[idx]->link_table = layers[2];
         nodes_array[idx]->weights = (float*)malloc(LAYER2_SIZE * sizeof(float));
-        nodes_array[idx]->self_bia = (float)rand()/RAND_MAX;
+        nodes_array[idx]->self_bia = 0.0f;  // 初始偏置为0
         for(int j=0; j<LAYER2_SIZE; j++){
-            nodes_array[idx]->weights[j] = (float)rand()/RAND_MAX;
+            nodes_array[idx]->weights[j] = ((float)rand()/RAND_MAX)*2.0f*limit2 - limit2;
         }
     }
     
-    // 初始化第2层到第3层的连接
+    float limit3 = sqrt(6.0f / (LAYER2_SIZE + LAYER3_SIZE));
     for(int i=0; i<LAYER2_SIZE; i++){
         int idx = LAYER0_SIZE + LAYER1_SIZE + i;
         nodes_array[idx]->link_num = LAYER3_SIZE;
         nodes_array[idx]->link_table = layers[3];
         nodes_array[idx]->weights = (float*)malloc(LAYER3_SIZE * sizeof(float));
-        nodes_array[idx]->self_bia = (float)rand()/RAND_MAX;
+        nodes_array[idx]->self_bia = 0.0f;  // 初始偏置为0
         for(int j=0; j<LAYER3_SIZE; j++){
-            nodes_array[idx]->weights[j] = (float)rand()/RAND_MAX;
+            nodes_array[idx]->weights[j] = ((float)rand()/RAND_MAX)*2.0f*limit3 - limit3;
+        }
+    }
+
+    float limit4 = sqrt(6.0f / (LAYER3_SIZE + LAYER4_SIZE));
+    for(int i=0; i<LAYER3_SIZE; i++){
+        int idx = LAYER0_SIZE + LAYER1_SIZE + LAYER2_SIZE + i;
+        nodes_array[idx]->link_num = LAYER4_SIZE;
+        nodes_array[idx]->link_table = layers[4];
+        nodes_array[idx]->weights = (float*)malloc(LAYER4_SIZE * sizeof(float));
+        nodes_array[idx]->self_bia = 0.0f;  // 初始偏置为0
+        for(int j=0; j<LAYER4_SIZE; j++){
+            nodes_array[idx]->weights[j] = ((float)rand()/RAND_MAX)*2.0f*limit4 - limit4;
         }
     }
     
     // 第3层（输出层）不需要权重，只需要设置bia作为标识
-    for(int i=0; i<LAYER3_SIZE; i++){
-        int idx = LAYER0_SIZE + LAYER1_SIZE + LAYER2_SIZE + i;
+    for(int i=0; i<LAYER4_SIZE; i++){
+        int idx = LAYER0_SIZE + LAYER1_SIZE + LAYER2_SIZE + LAYER3_SIZE + i;
         nodes_array[idx]->self_bia = (float)i;  // 用bia存储节点在输出层的索引
         nodes_array[idx]->link_num = 0;
         nodes_array[idx]->weights = NULL;
         nodes_array[idx]->link_table = NULL;
     }
     
-    printf("[INFO] Network initialized: %d+%d+%d+%d\n", LAYER0_SIZE, LAYER1_SIZE, LAYER2_SIZE, LAYER3_SIZE);
+    printf("[INFO] Network initialized: %d->%d->%d->%d->%d\n", LAYER0_SIZE, LAYER1_SIZE, LAYER2_SIZE, LAYER3_SIZE, LAYER4_SIZE);
 }
 
 void maxav_poolify(float* input, float* output, int in_f, int in_s, int out_f, int out_s){
@@ -136,18 +157,24 @@ void maxav_poolify(float* input, float* output, int in_f, int in_s, int out_f, i
 
 // 计算当前网络的平均loss
 float calculate_loss(float lable){
-    float targets[10] = {0};
-    targets[(int)lable] = 1;
+    int output_size = layer_size[LAYER_NUM-1];
+    float* targets = new float[output_size](); // 初始化为0
+    if(lable >= 0 && lable < output_size){
+        targets[(int)lable] = 1.0f;
+    }
     float* results = get_final_nodes_val("sigmoide");
-    return get_err(results, targets, 10);
-
+    float err = get_err(results, targets, output_size);
+    delete[] targets;
+    delete[] results;
+    return err;
 }
 // 判断网络输出结果，返回可能性最大的类别
 int get_predicted_class(){
     float* results = get_final_nodes_val((char*)"sigmoide");
+    int output_size = layer_size[LAYER_NUM-1];
     int predicted_class = 0;
     float max_value = results[0];
-    for(int j=1; j<LAYER3_SIZE; j++){
+    for(int j=1; j<output_size; j++){
         if(results[j] > max_value){
             max_value = results[j];
             predicted_class = j;
@@ -196,9 +223,20 @@ void train_sigal_bench(char* file_path){
     // 数据大小：784个float = 3136字节
     int data_size = feature_count * sizeof(float);
 
+    // 初始学习率和衰减设置
+    float initial_lr = LEARNING_RATE;
+    float min_lr = 0.00019f;  // 最小学习率（提高一点，不要太小
+    float decay_rate = 0.98f; // 更温和的衰减
+
     for(int runs=0; runs<RUNS; runs++){
         int correct_count = 0;
         int total_count = 0;
+        
+        // 计算当前轮的学习率（指数衰减）
+        float current_lr = initial_lr*pow(decay_rate, runs);
+        current_lr = current_lr > min_lr ? current_lr : min_lr;
+        
+        printf("[INFO] Epoch %d, Learning Rate: %.6f\n", runs+1, current_lr);
         
         fseek(f, 16, SEEK_SET);
         
@@ -229,28 +267,30 @@ void train_sigal_bench(char* file_path){
             init_val(shrinked_input);
     //get partial
             forward_spread();
-            float* results = get_final_nodes_val((char*)"signoide");
+            float* results_sigmoid = get_final_nodes_val((char*)"sigmoide");
+            float* results_raw = get_final_nodes_raw_val();
 
-            
-            float targets[LAYER3_SIZE] = {0.0f};
-            if(lable >= 0 && lable < LAYER3_SIZE){
+            int output_size = layer_size[LAYER_NUM-1];
+            float* targets = new float[output_size]();
+            if(lable >= 0 && lable < output_size){
                 targets[lable] = 1.0f;
             }
 
-            // 打印输出层的原始输入值（应用 sigmoid 之前）
+            // 打印输出层的原始输入值（应用 sigmoide 之前）
             int res =  get_predicted_class();
             if(i == 0 ){//&& lable == 1 && res == 2){
                 printf("[DEBUG] Output layer raw inputs: \n");
-                for(int j=0; j<LAYER3_SIZE; j++){
-                    float raw_input = results[j];
+                for(int j=0; j<output_size; j++){
+                    float raw_input = results_raw[j];
+                    float sigmoid_input = results_sigmoid[j];
                     float target = targets[j];
                     printf("t: %.4f ", target);
-                    printf("r: %.4f ", raw_input);
-                    printf("d: %.4f \n", target-raw_input);
+                    printf("r_raw: %.4f ", raw_input);
+                    printf("r_sig: %.4f ", sigmoid_input);
+                    printf("d: %.4f \n", target-sigmoid_input);
                 }
             }
-            
-            // 计算预测是否正确
+
             int predicted_class = get_predicted_class();
             
             
@@ -259,17 +299,40 @@ void train_sigal_bench(char* file_path){
             }
             total_count++;
             
-            init_partials(results, targets);
+            init_partials(results_raw, targets);
+            delete[] results_sigmoid;
+            delete[] results_raw;
+            delete[] targets;
             backward_pass();
-            
+            // for(int i=0; i<NODE_NUM; i++){
+            //     std::cout<<all_partials[i]<<" ";
+            // }
             delete[] input_s;
     //update
             for(int li=0; li<LAYER_NUM-1; li++){
                 for(int ni=0; ni<layer_size[li]; ni++){
                     Node* node = nodes_array[layers[li][ni]];
-                    node->self_bia -= LEARNING_RATE * bia_partials[node->index];
+                    
+                    // 梯度裁剪并更新偏置（使用动态学习率）
+                    float b_grad = current_lr * bia_partials[node->index];
+                    if(b_grad > 1.0f) b_grad = 1.0f;
+                    if(b_grad < -1.0f) b_grad = -1.0f;
+                    node->self_bia -= b_grad;
+                    
+                    // 裁剪偏置值，放宽限制
+                    if(node->self_bia > 10.0f) node->self_bia = 10.0f;
+                    if(node->self_bia < -10.0f) node->self_bia = -10.0f;
+                    
                     for(int wi=0; wi<node->link_num; wi++){
-                        node->weights[wi] -= LEARNING_RATE * node->w_par[wi];
+
+                        float w_grad = current_lr * node->w_par[wi];
+                        if(w_grad > 1.0f) w_grad = 1.0f;
+                        if(w_grad < -1.0f) w_grad = -1.0f;
+                        node->weights[wi] -= w_grad;
+                        
+
+                        if(node->weights[wi] > 10.0f) node->weights[wi] = 10.0f;
+                        if(node->weights[wi] < -10.0f) node->weights[wi] = -10.0f;
                     }
                 }
             }
@@ -277,15 +340,17 @@ void train_sigal_bench(char* file_path){
             // 计算这次传播的loss（使用get_err函数）
             float batch_loss = calculate_loss(lable);
             loss = 0.8f * loss + 0.2f * batch_loss;
-            
-            delete[] results;
         }
         
         // 打印本轮训练结果
         if(total_count > 0){
             float accuracy = (float)correct_count / total_count * 100;
-            printf("[INFO] Run %d/%d completed: %d/%d correct (%.2f%% accuracy), loss: %.4f\n", 
-                   runs+1, RUNS, correct_count, total_count, accuracy, loss);
+            printf("[INFO] Run %d/%d completed: %d/%d correct (%.2f%% accuracy), loss: %.4f (*10e-5)\n", 
+                   runs+1, RUNS, correct_count, total_count, accuracy, loss*100000);
+        }
+        if(runs%30==0){
+            save_network(__FILE, loss, LEARNING_RATE);
+            printf("saved to %s", __FILE);
         }
     }
 
@@ -294,16 +359,16 @@ void train_sigal_bench(char* file_path){
 
 int main(){
     printf("[INFO] training\n");
+    srand(10086);
     
     // 初始化神经网络
     init_network();
     
-    printf("[INFO] About to load network from network.json\n");
     
     // 尝试加载已有网络
     float loaded_loss = 1.0f;
     float loaded_lr = LEARNING_RATE;
-    if(load_network("network.json", &loaded_loss, &loaded_lr)){
+    if(load_network(__FILE, &loaded_loss, &loaded_lr)){
         loss = loaded_loss;
         printf("[INFO] Resumed from previous training, loss: %.4f\n", loss);
     } else {
@@ -313,11 +378,9 @@ int main(){
     printf("[INFO] Network loading completed\n");
     
     // 使用可修改的字符数组作为文件路径
-    char data_path[] = "mn\\tr_11.mnib";
-    
+    char data_path[] = "mn\\tr_0.mnib";
     // 执行训练
     train_sigal_bench(data_path);
-    
-    save_network("network.json", loss, LEARNING_RATE);
+    save_network(__FILE, loss, LEARNING_RATE);
     printf("[INFO] Training completed! Final loss: %.4f\n", loss);
 }
