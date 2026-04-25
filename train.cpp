@@ -4,6 +4,9 @@
 #include "load_net.h"
 #include <thread>
 #include <fstream>
+#include <windows.h>
+#include <stdio.h>
+#include <string.h>
 
 int layers[LAYER_NUM][MAX_LAYER_SIZE];
 int layer_size[LAYER_NUM];
@@ -18,11 +21,44 @@ float bia_partials[NODE_NUM];//id-->bia_par
 #define LAYER3_SIZE 100
 #define LAYER4_SIZE 10
 
-#define __FILE "network-2.json"
+#define RETRAIN_LEARNIN_RATE 0.000225f
 
-#define RUNS 300
+#define DATA_BEGIN_INDEX 0
+#define DATA_END_INDEX 60
+
+#define __FILE "network-2.json"
+#define DATA_PATH "mn\\tr_12.mnib"
+
+#define RUNS 120
 
 float loss=1.0f;
+
+
+// 调用 Python 脚本的函数
+int call_python_script(const char* script_path, const char* args) {
+    char cmd[512];
+    if (args != NULL && strlen(args) > 0) {
+        sprintf(cmd, "python \"%s\" %s", script_path, args);
+    } else {
+        sprintf(cmd, "python \"%s\"", script_path);
+    }
+    
+    printf("[INFO] Calling Python script: %s mio~\n", cmd);
+    int result = system(cmd);
+    
+    if (result == 0) {
+        printf("[INFO] Python script completed successfully nia~\n");
+    } else {
+        printf("[WARNING] Python script returned with code: %d nia~\n", result);
+    }
+    
+    return result;
+}
+
+
+float min_lr = 0.000195f; 
+float decay_rate = 0.985f; 
+float current_lr = LEARNING_RATE;
 
 
 // 初始化400+90+60+10全连接神经网络
@@ -223,20 +259,16 @@ void train_sigal_bench(char* file_path){
     // 数据大小：784个float = 3136字节
     int data_size = feature_count * sizeof(float);
 
-    // 初始学习率和衰减设置
-    float initial_lr = LEARNING_RATE;
-    float min_lr = 0.00019f;  // 最小学习率（提高一点，不要太小
-    float decay_rate = 0.98f; // 更温和的衰减
 
     for(int runs=0; runs<RUNS; runs++){
         int correct_count = 0;
         int total_count = 0;
         
         // 计算当前轮的学习率（指数衰减）
-        float current_lr = initial_lr*pow(decay_rate, runs);
+        current_lr = current_lr*decay_rate;
         current_lr = current_lr > min_lr ? current_lr : min_lr;
         
-        printf("[INFO] Epoch %d, Learning Rate: %.6f\n", runs+1, current_lr);
+        // printf("[INFO] Epoch %d, Learning Rate: %.6f\n", runs+1, current_lr);
         
         fseek(f, 16, SEEK_SET);
         
@@ -276,20 +308,19 @@ void train_sigal_bench(char* file_path){
                 targets[lable] = 1.0f;
             }
 
-            // 打印输出层的原始输入值（应用 sigmoide 之前）
-            int res =  get_predicted_class();
-            if(i == 0 ){//&& lable == 1 && res == 2){
-                printf("[DEBUG] Output layer raw inputs: \n");
-                for(int j=0; j<output_size; j++){
-                    float raw_input = results_raw[j];
-                    float sigmoid_input = results_sigmoid[j];
-                    float target = targets[j];
-                    printf("t: %.4f ", target);
-                    printf("r_raw: %.4f ", raw_input);
-                    printf("r_sig: %.4f ", sigmoid_input);
-                    printf("d: %.4f \n", target-sigmoid_input);
-                }
-            }
+            // // 打印输出层的原始输入值（应用 sigmoide 之前）
+            // if(rand() % 2000 == 0 ){//&& lable == 1 && res == 2){
+            //     printf("[DEBUG] Output layer raw inputs: \n");
+            //     for(int j=0; j<output_size; j++){
+            //         float raw_input = results_raw[j];
+            //         float sigmoid_input = results_sigmoid[j];
+            //         float target = targets[j];
+            //         printf("t: %.4f ", target);
+            //         printf("r_raw: %.4f ", raw_input);
+            //         printf("r_sig: %.4f ", sigmoid_input);
+            //         printf("d: %.4f \n", target-sigmoid_input);
+            //     }
+            // }
 
             int predicted_class = get_predicted_class();
             
@@ -343,12 +374,12 @@ void train_sigal_bench(char* file_path){
         }
         
         // 打印本轮训练结果
-        if(total_count > 0){
+        if((total_count > 0 && runs%20 == 0 )|| (runs <= 10 && runs%2==0)){
             float accuracy = (float)correct_count / total_count * 100;
-            printf("[INFO] Run %d/%d completed: %d/%d correct (%.2f%% accuracy), loss: %.4f (*10e-5)\n", 
-                   runs+1, RUNS, correct_count, total_count, accuracy, loss*100000);
+            printf("[INFO] Run %d/%d completed: %d/%d correct (%.2f%% accuracy), loss: %.8f %%, learning_rate: %.8f\n", 
+                   runs+1, RUNS, correct_count, total_count, accuracy, loss*100, current_lr);
         }
-        if(runs%30==0){
+        if(runs%50==0){
             save_network(__FILE, loss, LEARNING_RATE);
             printf("saved to %s", __FILE);
         }
@@ -365,22 +396,50 @@ int main(){
     init_network();
     
     
-    // 尝试加载已有网络
-    float loaded_loss = 1.0f;
-    float loaded_lr = LEARNING_RATE;
-    if(load_network(__FILE, &loaded_loss, &loaded_lr)){
-        loss = loaded_loss;
-        printf("[INFO] Resumed from previous training, loss: %.4f\n", loss);
-    } else {
-        printf("[INFO] Starting new training\n");
-    }
+    // // 尝试加载已有网络
+    // float loaded_loss = 1.0f;
+    // float loaded_lr = LEARNING_RATE;
+    // if(load_network(__FILE, &loaded_loss, &loaded_lr)){
+    //     loss = loaded_loss;
+    //     printf("[INFO] Resumed from previous training, loss: %.4f\n", loss);
+    // } else {
+    //     printf("[INFO] Starting new training\n");
+    // }
     
-    printf("[INFO] Network loading completed\n");
+    // printf("[INFO] Network loading completed\n");
     
     // 使用可修改的字符数组作为文件路径
-    char data_path[] = "mn\\tr_0.mnib";
+
     // 执行训练
-    train_sigal_bench(data_path);
-    save_network(__FILE, loss, LEARNING_RATE);
+    for(int j = 0; j<5; j++){
+        for(int i = DATA_BEGIN_INDEX; i <DATA_END_INDEX; i++){    
+            
+            // 尝试加载已有网络
+            float loaded_loss = 1.0f;
+            float loaded_lr = LEARNING_RATE;
+            if(load_network(__FILE, &loaded_loss, &loaded_lr)){
+                loss = loaded_loss;
+                printf("[INFO] Resumed from previous training, loss: %.4f\n", loss);
+            } else {
+                printf("[INFO] Starting new training\n");
+            }
+            
+            printf("[INFO] Network loading completed\n");
+            
+            char file_path[50] = {0};
+            char st1[] = "mn\\tr_",
+                st2[] = ".mnib";
+            sprintf(file_path, "%s%d%s", st1, i, st2);
+
+            train_sigal_bench(file_path);
+            save_network(__FILE, loss, LEARNING_RATE);
+
+            current_lr = RETRAIN_LEARNIN_RATE;
+            printf("[INFO] Epoch %d completed, calling Python pruning script mio~\n", j+1);
+            char python_args[256];
+            sprintf(python_args, "\"%s\" --random-percent 0.5", __FILE);
+            call_python_script("e:\\c\\perceptron-2\\prune_weights.py", python_args);
+        }
+    }
     printf("[INFO] Training completed! Final loss: %.4f\n", loss);
 }

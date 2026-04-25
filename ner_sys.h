@@ -7,7 +7,7 @@
 #include <cmath>
 #include <cassert>
 
-#define LEARNING_RATE 0.000215f
+#define LEARNING_RATE 0.00655f
 
 typedef struct Node {
     int index;              // 节点在列表中的索引
