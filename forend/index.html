@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NumSign</title>
+    <style>
+        canvas#cav {
+            /*
+            width: 1;
+            height: 1; 
+            */
+        }
+        #app {
+            width: 0.99;
+            height: 0.99;
+            color: white;
+            background: #232225;
+            display: flex;
+            flex:auto;
+            flex-direction: column; /* 竖向排列 */
+            align-items: center; /* 水平居中 */
+        }
+        body {
+            background: #111;
+        }
+        html {
+            font-family: sans-serif;
+        }
+
+        div:first-of-type {
+        display: flex;
+        align-items: flex-start;
+        margin-bottom: 5px;
+        }
+
+        label {
+        margin-right: 15px;
+        line-height: 32px;
+        }
+
+        input {
+        appearance: none;
+
+        border-radius: 50%;
+        width: 16px;
+        height: 16px;
+
+        border: 2px solid #999;
+        transition: 0.2s all linear;
+        margin-right: 5px;
+
+        position: relative;
+        top: 4px;
+        }
+
+        input:checked {
+        border: 6px solid rgb(218, 218, 218);
+        }
+
+        button{
+        margin:20px;
+        color: white;
+        background-color: #282235;
+        padding: 5px 10px;
+        border-radius: 0;
+        border: 0;
+        font-size: 14px;
+        }
+
+        button:hover,
+        button:focus {
+        color: #999;
+        }
+
+        button:active {
+        background-color: white;
+        color: black;
+        outline: 1px solid black;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <div id="top">
+            <div id="numsign">
+                <h1>NumSign.</h1>
+            </div>
+        <form>
+            <fieldset>
+              <legend>colors</legend>
+              <div>
+                <input type="radio" id="contactChoice1" name="contact" value=4 checked />
+                <label for="contactChoice1">wihte</label>
+                <input type="radio" id="contactChoice2" name="contact" value=1 />
+                <label for="contactChoice2">red</label>
+                <input type="radio" id="contactChoice3" name="contact" value=0 />
+                <label for="contactChoice3">erase</label>
+              </div>
+            </fieldset>
+          </form>
+          <button id="reset">reset</button>
+          </div>
+        <canvas id="cav"></canvas>
+        <div id="lable">
+            <button id="ok">finished</button>
+            <h2 id="hh">PLEASE WRITE A NUMBER</h2>
+            <h2 id="hhh">...</h2>
+            <div id="res"></div>
+        </div>
+    </div>
+</body>
+<script src="index.js"></script>
+</html>

@@ -1,0 +1,19 @@
+{
+  "name": "numsign",
+  "version": "1.0.0",
+  "description": "identify numbers writen by hand",
+  "repository": {
+    "type": "git",
+    "url": ".git"
+  },
+  "license": "MIT",
+  "author": "ela ian",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "test": "vite"
+  },
+  "dependencies": {
+    "vite": "^8.0.10"
+  }
+}
