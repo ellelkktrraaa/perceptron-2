@@ -1,0 +1,358 @@
+#include "train.h"
+#include "ner_sys.h"
+#include "forward_spread.h"
+#include "backward_spread.h"
+#include "store_net.h"
+#include "sample_generater.h"
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <thread>
+#include <vector>
+#include <mutex>
+#include <atomic>
+#include <filesystem>
+#include <fstream>
+
+Node* nodes_array[NODE_NUM];
+float all_partials[NODE_NUM];
+int layers[LAYER_NUM][MAX_LAYER_SIZE];
+int layer_size[LAYER_NUM];
+
+std::mutex weight_mutex;
+std::atomic<int> global_bench_index{0};
+std::atomic<int> total_samples_processed{0};
+
+int total_mini_benches = 0;
+int input_size = 0;
+int output_size = 0;
+
+// 宏定义：每个线程每次处理多少个mini_bench后才同步权重
+#define BENCH_PER_SYNC 8
+
+struct MiniBench {
+    std::vector<float> input;
+    std::vector<float> target;
+};
+
+std::vector<MiniBench> all_mini_benches;
+
+void init_network(){
+    for(int i=0; i<NODE_NUM; i++){
+        nodes_array[i] = (Node*)malloc(sizeof(Node));
+        nodes_array[i]->w_par = NULL;
+        nodes_array[i]->b_par = NULL;
+        nodes_array[i]->weights = NULL;
+        nodes_array[i]->self_val = 0.0f;
+        nodes_array[i]->link_num = 0;
+        nodes_array[i]->link_table = NULL;
+    }
+}
+
+void init_network_weights_from_master(Node** local_nodes){
+    for(int i=0; i<NODE_NUM; i++){
+        local_nodes[i] = (Node*)malloc(sizeof(Node));
+        memcpy(local_nodes[i], nodes_array[i], sizeof(Node));
+        
+        if(nodes_array[i]->link_num > 0 && nodes_array[i]->weights != NULL){
+            local_nodes[i]->weights = (float*)malloc(nodes_array[i]->link_num * sizeof(float));
+            memcpy(local_nodes[i]->weights, nodes_array[i]->weights, nodes_array[i]->link_num * sizeof(float));
+        }
+        
+        if(nodes_array[i]->link_num > 0){
+            local_nodes[i]->w_par = (float*)calloc(nodes_array[i]->link_num, sizeof(float));
+            local_nodes[i]->b_par = (float*)calloc(nodes_array[i]->link_num, sizeof(float));
+        }
+        
+        if(nodes_array[i]->link_num > 0 && nodes_array[i]->link_table != NULL){
+            local_nodes[i]->link_table = (int*)malloc(nodes_array[i]->link_num * sizeof(int));
+            memcpy(local_nodes[i]->link_table, nodes_array[i]->link_table, nodes_array[i]->link_num * sizeof(int));
+        }
+    }
+}
+
+void cleanup_local_network(Node** local_nodes){
+    for(int i=0; i<NODE_NUM; i++){
+        if(local_nodes[i]){
+            if(local_nodes[i]->w_par) free(local_nodes[i]->w_par);
+            if(local_nodes[i]->b_par) free(local_nodes[i]->b_par);
+            if(local_nodes[i]->weights) free(local_nodes[i]->weights);
+            if(local_nodes[i]->link_table) free(local_nodes[i]->link_table);
+            free(local_nodes[i]);
+        }
+    }
+}
+
+void cleanup_network(){
+    for(int i=0; i<NODE_NUM; i++){
+        if(nodes_array[i]->w_par) free(nodes_array[i]->w_par);
+        if(nodes_array[i]->b_par) free(nodes_array[i]->b_par);
+        if(nodes_array[i]->weights) free(nodes_array[i]->weights);
+        if(nodes_array[i]->link_table) free(nodes_array[i]->link_table);
+        free(nodes_array[i]);
+    }
+}
+
+void forward_spread_local(Node** local_nodes){
+    for(int li=0; li<LAYER_NUM-1; li++){
+        for(int ni=0; ni<layer_size[li]; ni++){
+            Node* node = local_nodes[layers[li][ni]];
+            int* link_table = node->link_table;
+            int link_num = node->link_num;
+            float* weights = node->weights;
+            float bia = node->self_bia;
+            float self_val = node->self_val;
+            
+            node->self_val = 0.0f;
+            self_val = z(self_val - bia);
+            
+            for(int to=0; to<link_num; to++){
+                Node* to_node = local_nodes[link_table[to]];
+                to_node->self_val += self_val * weights[to];
+            }
+        }
+    }
+}
+
+void backward_pass_local(Node** local_nodes, float* local_partials){
+    for(int j=LAYER_NUM-3; j>=0; j--){
+        for(int i=0; i<layer_size[j]; i++){
+            int node_idx = layers[j][i];
+            Node* node = local_nodes[node_idx];
+            
+            if(node->link_num <= 0) continue;
+            
+            float node_partial = local_partials[node_idx];
+            
+            for(int k=0; k<node->link_num; k++){
+                int child_idx = node->link_table[k];
+                float weight = node->weights[k];
+                
+                local_partials[node_idx] += node_partial * weight;
+                node->w_par[k] += node_partial * local_nodes[child_idx]->self_val;
+            }
+        }
+    }
+}
+
+void compute_gradients_local(Node** local_nodes, float* input, float* target, float* local_partials){
+    for(int i=0; i<layer_size[0]; i++){
+        local_nodes[layers[0][i]]->self_val = input[i];
+    }
+    
+    for(int li=1; li<LAYER_NUM; li++){
+        for(int ni=0; ni<layer_size[li]; ni++){
+            local_nodes[layers[li][ni]]->self_val = 0.0f;
+        }
+    }
+    
+    forward_spread_local(local_nodes);
+    
+    int output_layer = LAYER_NUM - 1;
+    for(int i=0; i<layer_size[output_layer]; i++){
+        float val = local_nodes[layers[output_layer][i]]->self_val;
+        val = z(val);
+        local_partials[layers[output_layer][i]] = 2 * (val - target[i]) * val * (1 - val);
+    }
+    
+    backward_pass_local(local_nodes, local_partials);
+}
+
+// 使用本地梯度更新本地权重（无锁）
+void update_local_weights(Node** local_nodes){
+    for(int i=0; i<NODE_NUM; i++){
+        Node* node = local_nodes[i];
+        if(node->link_num > 0 && node->w_par != NULL){
+            for(int j=0; j<node->link_num; j++){
+                node->weights[j] -= LEARNING_RATE * node->w_par[j];
+                node->w_par[j] = 0.0f;
+            }
+        }
+    }
+}
+
+// 上传本地权重到主网络（加锁）
+void upload_local_weights(Node** local_nodes){
+    std::lock_guard<std::mutex> lock(weight_mutex);
+    
+    for(int i=0; i<NODE_NUM; i++){
+        Node* local_node = local_nodes[i];
+        Node* master_node = nodes_array[i];
+        
+        if(master_node->link_num > 0 && master_node->weights != NULL){
+            for(int j=0; j<master_node->link_num; j++){
+                // 累加本地权重到主网络
+                master_node->weights[j] += local_node->weights[j];
+            }
+        }
+    }
+}
+
+// 从主网络同步平均权重到本地（加锁）
+void sync_average_weights_from_master(Node** local_nodes, int thread_count){
+    std::lock_guard<std::mutex> lock(weight_mutex);
+    
+    for(int i=0; i<NODE_NUM; i++){
+        Node* local_node = local_nodes[i];
+        Node* master_node = nodes_array[i];
+        
+        if(master_node->link_num > 0 && master_node->weights != NULL){
+            for(int j=0; j<master_node->link_num; j++){
+                // 计算平均权重
+                float avg_weight = master_node->weights[j] / thread_count;
+                local_node->weights[j] = avg_weight;
+                // 重置主网络权重为平均值，为下一轮累加做准备
+                master_node->weights[j] = avg_weight;
+            }
+        }
+    }
+}
+
+// 初始化主网络权重为0，用于累加
+void reset_master_weights_for_accumulate(){
+    std::lock_guard<std::mutex> lock(weight_mutex);
+    
+    for(int i=0; i<NODE_NUM; i++){
+        Node* master_node = nodes_array[i];
+        if(master_node->link_num > 0 && master_node->weights != NULL){
+            for(int j=0; j<master_node->link_num; j++){
+                master_node->weights[j] = 0.0f;
+            }
+        }
+    }
+}
+
+void train_worker_thread(int thread_id){
+    Node* local_nodes[NODE_NUM];
+    float local_partials[NODE_NUM] = {0};
+    
+    // 初始化本地网络（从主网络复制初始权重）
+    init_network_weights_from_master(local_nodes);
+    
+    while(true){
+        // 获取一个bench索引
+        int bench_idx = global_bench_index.fetch_add(1);
+        
+        if(bench_idx >= total_mini_benches){
+            break;
+        }
+        
+        // 每bench_PER_SYNC个bench同步一次
+        int bench_in_group = bench_idx % BENCH_PER_SYNC;
+        
+        // 如果是新的一组开始，且不是第一个bench，先同步权重
+        if(bench_in_group == 0 && bench_idx > 0){
+            // 上传本地权重到主网络
+            upload_local_weights(local_nodes);
+            
+            // 等待所有线程都上传完成（通过原子计数或屏障）
+            // 这里简化为每个线程自己计算平均
+            sync_average_weights_from_master(local_nodes, THREAD_NUM);
+        }
+        
+        // 处理mini_bench
+        MiniBench& mini_bench = all_mini_benches[bench_idx];
+        
+        // 前向传播 + 反向传播计算梯度
+        compute_gradients_local(local_nodes, mini_bench.input.data(), mini_bench.target.data(), local_partials);
+        
+        // 立即用本地梯度更新本地权重（无锁）
+        update_local_weights(local_nodes);
+        
+        total_samples_processed.fetch_add(1);
+    }
+    
+    // 上传最后一次的权重
+    upload_local_weights(local_nodes);
+    
+    cleanup_local_network(local_nodes);
+}
+
+bool load_mini_benches(){
+    namespace fs = std::filesystem;
+    
+    if(!fs::exists(MINI_bench_DIR)){
+        printf("Error: Mini bench directory not found: %s\n", MINI_bench_DIR);
+        return false;
+    }
+    
+    all_mini_benches.clear();
+    
+    for(const auto& entry : fs::directory_iterator(MINI_bench_DIR)){
+        if(entry.is_regular_file()){
+            std::ifstream file(entry.path(), std::ios::binary);
+            if(!file) continue;
+            
+            MiniBench bench;
+            
+            size_t input_count, target_count;
+            file.read(reinterpret_cast<char*>(&input_count), sizeof(size_t));
+            file.read(reinterpret_cast<char*>(&target_count), sizeof(size_t));
+            
+            if(input_count == 0 || target_count == 0) continue;
+            
+            if(input_size == 0){
+                input_size = input_count;
+                output_size = target_count;
+            }
+            
+            bench.input.resize(input_count);
+            bench.target.resize(target_count);
+            
+            file.read(reinterpret_cast<char*>(bench.input.data()), input_count * sizeof(float));
+            file.read(reinterpret_cast<char*>(bench.target.data()), target_count * sizeof(float));
+            
+            all_mini_benches.push_back(std::move(bench));
+        }
+    }
+    
+    total_mini_benches = all_mini_benches.size();
+    printf("Loaded %d mini benches (input: %d, output: %d)\n", 
+           total_mini_benches, input_size, output_size);
+    
+    return total_mini_benches > 0;
+}
+
+int main(void){
+    printf("Starting async training with %d threads...\n", THREAD_NUM);
+    printf("Sync weights every %d mini benches\n", BENCH_PER_SYNC);
+    
+    init_network();
+    
+    if(!load_mini_benches()){
+        printf("Failed to load mini benches. Exiting.\n");
+        cleanup_network();
+        return 1;
+    }
+    
+    for(int round=0; round<ROUD; round++){
+        printf("Round %d/%d\n", round+1, ROUD);
+        
+        global_bench_index.store(0);
+        total_samples_processed.store(0);
+        
+        // 重置主网络权重用于累加
+        reset_master_weights_for_accumulate();
+        
+        // 启动工作线程
+        std::vector<std::thread> threads;
+        for(int t=0; t<THREAD_NUM; t++){
+            threads.emplace_back(train_worker_thread, t);
+        }
+        
+        // 等待所有工作线程完成
+        for(auto& th : threads){
+            th.join();
+        }
+        
+        // 最后一轮同步：计算所有线程权重的平均
+        // 这里简化处理，实际应该在每个线程结束时都做
+        
+        printf("  Processed %d mini benches\n", total_samples_processed.load());
+    }
+    
+    cleanup_network();
+    printf("Training completed.\n");
+    
+    return 0;
+}
