@@ -23,7 +23,7 @@ float bia_partials[NODE_NUM];//id-->bia_par
 
 #define RETRAIN_LEARNIN_RATE 0.000225f
 
-#define DATA_BEGIN_INDEX 0
+#define DATA_BEGIN_INDEX 17
 #define DATA_END_INDEX 60
 
 #define __FILE "network-2.json"
@@ -32,6 +32,8 @@ float bia_partials[NODE_NUM];//id-->bia_par
 #define RUNS 120
 
 float loss=1.0f;
+float cur_loss=1.0f;
+float smo_loss=1.0f;
 
 
 // 调用 Python 脚本的函数
@@ -56,11 +58,11 @@ int call_python_script(const char* script_path, const char* args) {
 }
 
 
-float min_lr = 0.000195f; 
-float decay_rate = 0.985f; 
-float current_lr = LEARNING_RATE;
+float min_lr = 0.00008f; 
+float decay_rate = 0.999f;
+float current_lr = 0.0006f;
 
-
+//acc 30 --> 0.0001
 // 初始化400+90+60+10全连接神经网络
 void init_network(){
     for(int i=0; i<NODE_NUM; i++){
@@ -198,7 +200,7 @@ float calculate_loss(float lable){
     if(lable >= 0 && lable < output_size){
         targets[(int)lable] = 1.0f;
     }
-    float* results = get_final_nodes_val("sigmoide");
+    float* results = get_final_nodes_val((char*)"e");
     float err = get_err(results, targets, output_size);
     delete[] targets;
     delete[] results;
@@ -206,7 +208,7 @@ float calculate_loss(float lable){
 }
 // 判断网络输出结果，返回可能性最大的类别
 int get_predicted_class(){
-    float* results = get_final_nodes_val((char*)"sigmoide");
+    float* results = get_final_nodes_val((char*)"e");
     int output_size = layer_size[LAYER_NUM-1];
     int predicted_class = 0;
     float max_value = results[0];
@@ -260,13 +262,42 @@ void train_sigal_bench(char* file_path){
     int data_size = feature_count * sizeof(float);
 
 
-    for(int runs=0; runs<RUNS; runs++){
+    for(int runs=0; runs<RUNS ; runs++){
         int correct_count = 0;
         int total_count = 0;
         
-        // 计算当前轮的学习率（指数衰减）
-        current_lr = current_lr*decay_rate;
-        current_lr = current_lr > min_lr ? current_lr : min_lr;
+        cur_loss = 0.9f*smo_loss+0.1f*loss;
+
+        current_lr*=decay_rate;
+        
+        // 动态学习率：loss下降时衰减，loss上升时提高
+        // if(cur_loss > smo_loss){
+        //     // loss上升了，小猫迷路了，需要更大的力气跑回家
+        //     current_lr = current_lr * 1.1f;
+        //     if(current_lr > 0.01f) current_lr = 0.01f; // 上限
+        // } else {
+        //     // loss下降了，慢慢衰减
+        //     current_lr = current_lr * decay_rate;
+        //     if(current_lr < min_lr) current_lr = min_lr; // 下限
+        // }
+
+        // if(cur_loss>0.09){
+        //     current_lr = 0.00550f;
+        // }
+        // if(cur_loss>0.07){
+        //     current_lr = 0.0030f;
+        // }
+        // else if(cur_loss>0.05){
+        //     current_lr = 0.0010f;
+        // }
+        // else if(cur_loss>0.03){
+        //     current_lr = 0.00030f;
+        // }
+        // else if(cur_loss>0.02){
+        //     current_lr = 0.0001f;
+        // }// the smaller range makes the train more unstable, the moddel is more possable to stuck at one stage
+
+        smo_loss = cur_loss;
         
         // printf("[INFO] Epoch %d, Learning Rate: %.6f\n", runs+1, current_lr);
         
@@ -299,8 +330,9 @@ void train_sigal_bench(char* file_path){
             init_val(shrinked_input);
     //get partial
             forward_spread();
-            float* results_sigmoid = get_final_nodes_val((char*)"sigmoide");
+            // float* results_sigmoid = get_final_nodes_val((char*)"sigmoide");
             float* results_raw = get_final_nodes_raw_val();
+            float* results_softmax = get_final_nodes_val((char*)"e");
 
             int output_size = layer_size[LAYER_NUM-1];
             float* targets = new float[output_size]();
@@ -308,30 +340,36 @@ void train_sigal_bench(char* file_path){
                 targets[lable] = 1.0f;
             }
 
-            // // 打印输出层的原始输入值（应用 sigmoide 之前）
-            // if(rand() % 2000 == 0 ){//&& lable == 1 && res == 2){
-            //     printf("[DEBUG] Output layer raw inputs: \n");
-            //     for(int j=0; j<output_size; j++){
-            //         float raw_input = results_raw[j];
-            //         float sigmoid_input = results_sigmoid[j];
-            //         float target = targets[j];
-            //         printf("t: %.4f ", target);
-            //         printf("r_raw: %.4f ", raw_input);
-            //         printf("r_sig: %.4f ", sigmoid_input);
-            //         printf("d: %.4f \n", target-sigmoid_input);
-            //     }
-            // }
-
             int predicted_class = get_predicted_class();
-            
-            
             if(predicted_class == lable){
                 correct_count++;
             }
             total_count++;
+            // 打印输出层的原始输入值（应用 sigmoide 之前）
+            if(rand() % 200 == 0 ){//&& lable == 1 && res == 2){
+                printf("[DEBUG] Output layer raw inputs: \n");
+                for(int j=0; j<output_size; j++){
+                    float raw_input = results_raw[j];
+                    float sigmoid_input = results_softmax[j];
+                    float target = targets[j];
+                    printf("t: %.4f ", target);
+                    printf("r_raw: %.4f ", raw_input);
+                    printf("r_sig: %.4f ", sigmoid_input);
+                    printf("d: %.4f ", target-sigmoid_input);
+                    if(target>0.1){
+                        printf(" t");
+                    }
+                    if(predicted_class==j){
+                        printf(" p");
+                    }
+                    printf("\n");
+                }
+            }
             
-            init_partials(results_raw, targets);
-            delete[] results_sigmoid;
+        
+            
+            init_partials(results_softmax, targets);
+            delete[] results_softmax;
             delete[] results_raw;
             delete[] targets;
             backward_pass();
@@ -359,7 +397,12 @@ void train_sigal_bench(char* file_path){
                         float w_grad = current_lr * node->w_par[wi];
                         if(w_grad > 1.0f) w_grad = 1.0f;
                         if(w_grad < -1.0f) w_grad = -1.0f;
-                        node->weights[wi] -= w_grad;
+                        
+                        // L2正则化（权重衰减）
+                        float lambda_l2 = 0.0002f;
+                        float l2_reg = 2.0f * lambda_l2 * node->weights[wi];
+                        
+                        node->weights[wi] -= w_grad + current_lr * l2_reg;
                         
 
                         if(node->weights[wi] > 10.0f) node->weights[wi] = 10.0f;
@@ -369,18 +412,17 @@ void train_sigal_bench(char* file_path){
             }
             
             // 计算这次传播的loss（使用get_err函数）
-            float batch_loss = calculate_loss(lable);
-            loss = 0.8f * loss + 0.2f * batch_loss;
+            loss = calculate_loss(lable);
         }
         
         // 打印本轮训练结果
-        if((total_count > 0 && runs%20 == 0 )|| (runs <= 10 && runs%2==0)){
+        if((total_count > 0 && runs%1 == 0 )|| (runs <= 10 && runs%2==0)){
             float accuracy = (float)correct_count / total_count * 100;
             printf("[INFO] Run %d/%d completed: %d/%d correct (%.2f%% accuracy), loss: %.8f %%, learning_rate: %.8f\n", 
-                   runs+1, RUNS, correct_count, total_count, accuracy, loss*100, current_lr);
+                   runs+1, RUNS, correct_count, total_count, accuracy, cur_loss*100, current_lr);
         }
         if(runs%50==0){
-            save_network(__FILE, loss, LEARNING_RATE);
+            save_network(__FILE, cur_loss, LEARNING_RATE);
             printf("saved to %s", __FILE);
         }
     }
@@ -405,6 +447,8 @@ int main(){
     // } else {
     //     printf("[INFO] Starting new training\n");
     // }
+
+
     
     // printf("[INFO] Network loading completed\n");
     
@@ -412,14 +456,16 @@ int main(){
 
     // 执行训练
     for(int j = 0; j<5; j++){
-        for(int i = DATA_BEGIN_INDEX; i <DATA_END_INDEX; i++){    
+        for(int i = DATA_BEGIN_INDEX+1; i <DATA_END_INDEX; i++){    
             
-            // 尝试加载已有网络
+            //尝试加载已有网络
             float loaded_loss = 1.0f;
             float loaded_lr = LEARNING_RATE;
             if(load_network(__FILE, &loaded_loss, &loaded_lr)){
-                loss = loaded_loss;
-                printf("[INFO] Resumed from previous training, loss: %.4f\n", loss);
+                cur_loss = loaded_loss;
+                loss = cur_loss;
+                smo_loss = loss;
+                printf("[INFO] Resumed from previous training, loss: %.4f\n", cur_loss);
             } else {
                 printf("[INFO] Starting new training\n");
             }
@@ -432,14 +478,14 @@ int main(){
             sprintf(file_path, "%s%d%s", st1, i, st2);
 
             train_sigal_bench(file_path);
-            save_network(__FILE, loss, LEARNING_RATE);
+            save_network(__FILE, cur_loss, LEARNING_RATE);
 
             current_lr = RETRAIN_LEARNIN_RATE;
-            printf("[INFO] Epoch %d completed, calling Python pruning script mio~\n", j+1);
-            char python_args[256];
-            sprintf(python_args, "\"%s\" --random-percent 0.5", __FILE);
-            call_python_script("e:\\c\\perceptron-2\\prune_weights.py", python_args);
+            // printf("[INFO] Epoch %d completed, calling Python pruning script mio~\n", j+1);
+            // char python_args[256];
+            // sprintf(python_args, "\"%s\" --random-percent 0.5", __FILE);
+            // call_python_script("e:\\c\\perceptron-2\\prune_weights.py", python_args);
         }
     }
-    printf("[INFO] Training completed! Final loss: %.4f\n", loss);
+    printf("[INFO] Training completed! Final loss: %.4f\n", cur_loss);
 }

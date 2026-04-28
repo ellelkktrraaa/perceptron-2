@@ -45,9 +45,9 @@ void forward_spread(){
                 activated_val = z(node->self_val - bia);
             }
             
-            // 裁剪激活值到合理范围，稍微放宽一点
-            if(activated_val > 5.0f) activated_val = 5.0f;
-            if(activated_val < -5.0f) activated_val = -5.0f;
+            // // 裁剪激活值到合理范围，稍微放宽一点
+            // if(activated_val > 10.0f) activated_val = 10.0f;
+            // if(activated_val < -10.0f) activated_val = -10.0f;
             
             for(int to=0; to<link_num; to++){
                 Node* to_node = nodes_array[link_table[to]];
@@ -55,24 +55,34 @@ void forward_spread(){
             }
         }
         // 对当前层的输出进行裁剪，防止值爆炸
-        if(li+1 < LAYER_NUM){
-            for(int ni=0; ni<layer_size[li+1]; ni++){
-                Node* node = nodes_array[layers[li+1][ni]];
-                if(node->self_val > 50.0f) node->self_val = 50.0f;
-                if(node->self_val < -50.0f) node->self_val = -50.0f;
-            }
-        }
+        // if(li+1 < LAYER_NUM){
+        //     for(int ni=0; ni<layer_size[li+1]; ni++){
+        //         Node* node = nodes_array[layers[li+1][ni]];
+        //         if(node->self_val > 10.0f) node->self_val = 10.0f;
+        //         if(node->self_val < -10.0f) node->self_val = -10.0f;
+        //     }
+        // }
     }
 }
 
 float* get_final_nodes_val(char* mode){
+    /*
+    e * 1-p () --> softmax
+    sigmoid * 1-p () -->shit
+    */
     float* final_nodes_val = new float[layer_size[LAYER_NUM-1]];
+    float max = -100, min = 100;
+    for(int i=0; i<layer_size[LAYER_NUM-1]; i++){
+        float vali=nodes_array[layers[LAYER_NUM-1][i]]->self_val ;
+        if(vali>max)max=vali;
+        if(vali<min)min=vali;
+    }
     for(int i=0; i<layer_size[LAYER_NUM-1]; i++){
         float vali=nodes_array[layers[LAYER_NUM-1][i]]->self_val ;//统一bia为0
         if(strcmp(mode, "sigmoide") == 0){
             vali=s(vali);
-        }else{
-            vali=z(vali);
+        }else if(strcmp(mode, "e") == 0){
+            vali=e(vali-max);
         }
         final_nodes_val[i]=vali;
     }

@@ -28,19 +28,22 @@ void partial_resolver(Node* node, float simu(float),  float simup(float)){
     float* w_par = node->w_par;
     float* b_par = node->b_par;
     float self_partial = 0.0f;
+    
+    float bia = node->self_bia;
+    float activated_val = z(self_val - bia);
 
     for(int i=0; i<weight_size; i++){
-        //结果:正partial
         float downstream_bias = nodes_array[node->link_table[i]]->self_bia;
-        float freshed_contribution_to_node = z_partial(nodes_array[link_table[i]]->self_val);
-        float w_grad = freshed_contribution_to_node*self_val*all_partials[link_table[i]]*1.0f;
+        float downstream_self_val = nodes_array[link_table[i]]->self_val;
+        float freshed_contribution_to_node = z_partial(downstream_self_val - downstream_bias);
+        float w_grad = freshed_contribution_to_node*activated_val*all_partials[link_table[i]]*1.0f;
         float b_grad = freshed_contribution_to_node*all_partials[link_table[i]]*(-1.0f);
         
         // 裁剪梯度，放宽限制
-        if(w_grad > 10.0f) w_grad = 10.0f;
-        if(w_grad < -10.0f) w_grad = -10.0f;
-        if(b_grad > 10.0f) b_grad = 10.0f;
-        if(b_grad < -10.0f) b_grad = -10.0f;
+        if(w_grad > 3.0f) w_grad = 3.0f;
+        if(w_grad < -3.0f) w_grad = -3.0f;
+        if(b_grad > 3.0f) b_grad = 3.0f;
+        if(b_grad < -3.0f) b_grad = -3.0f;
         
         w_par[i] = w_par[i]*0.8+0.2*w_grad;
         b_par[i] = b_par[i]*0.8+0.2*b_grad;
@@ -52,7 +55,7 @@ void partial_resolver(Node* node, float simu(float),  float simup(float)){
         if(b_par[i] < -10.0f) b_par[i] = -10.0f;
         
         bia_partials[node->link_table[i]] += b_par[i];
-        float grad_contrib = all_partials[link_table[i]]*weights[i]*z_partial(self_val*weights[i] - downstream_bias);
+        float grad_contrib = all_partials[link_table[i]]*weights[i]*freshed_contribution_to_node;
         // 裁剪梯度贡献，放宽限制
         if(grad_contrib > 10.0f) grad_contrib = 10.0f;
         if(grad_contrib < -10.0f) grad_contrib = -10.0f;

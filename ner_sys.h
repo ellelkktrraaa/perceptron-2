@@ -7,7 +7,7 @@
 #include <cmath>
 #include <cassert>
 
-#define LEARNING_RATE 0.00655f
+#define LEARNING_RATE 0.00003f//after the func(loss) had been build, this value seem to be use less
 
 typedef struct Node {
     int index;              // 节点在列表中的索引
@@ -43,13 +43,22 @@ inline float z_partial(float x){
 
 //sigmoide-->relu
 
-float s(float x){
+inline float s(float x){
     return 1.0f / (1.0f + exp(-x));;
 }
 // LeakyReLU 导数
-float s_partial(float x){
+inline float s_partial(float x){
     float v = s(x);
     return v * (1.0f - v);
+}
+
+inline float e(float x){
+    return exp(x);
+}
+
+inline float e_partial(float x){
+    return exp(x);
+
 }
 
 void init_layer(int layer_index, int size, int* nodes_index){
